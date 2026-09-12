@@ -99,18 +99,3 @@ Responses are cached in-process for 60s per profile; `refresh=1` bypasses.
 - Credentials are resolved in-process and **never serialized**; the wire carries
   `configured: true/false` and a source label only.
 - The only outbound calls are the provider quota endpoints above.
-
-## Publishing to the Hermes catalog
-
-1. Push this folder as a public GitHub repo with a `LICENSE`.
-2. `hermes plugins validate .` **and** `python3 scripts/validate_plugin_catalog.py` (from the
-   `hermes-agent` repo) must pass. Both run in CI.
-3. Wait at least **2 weeks** after the commit you intend to pin (supply-chain policy).
-4. Open a PR to `NousResearch/hermes-agent` adding
-   `plugin-catalog/ai-usage-tracker.yaml` (see `catalog/ai-usage-tracker.yaml` here) with the
-   exact **40-character, quoted** commit SHA. Presence in that directory *is* the approval
-   gate; entries may only come from the repo owner or a major contributor.
-5. SHA bumps later are new PRs, reviewed as a diff over the upstream commit range.
-
-Until the catalog PR merges, `hermes plugins install <owner>/<repo>` and the `hermes://`
-install link both work immediately — the catalog only adds review and pinning.
