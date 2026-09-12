@@ -406,6 +406,15 @@ function UsagePage() {
               children: `Showing the last good response — the refresh failed: ${error?.message || error}`
             })
           : null,
+        // A backend started before this plugin version still serves the old
+        // payload shape (no per-profile data) — say so instead of silently
+        // rendering a page with no picker.
+        data.profiles
+          ? null
+          : jsx('div', {
+              className: 'text-[0.6875rem] text-(--ui-text-quaternary)',
+              children: 'This backend is running an older copy of the plugin (no per-profile data), so the profile picker is hidden — quit and relaunch the Hermes desktop app to load the current backend.'
+            }),
         jsx('div', {
           className: 'text-[0.6875rem] text-(--ui-text-quaternary)',
           children: profiles.length > 1
