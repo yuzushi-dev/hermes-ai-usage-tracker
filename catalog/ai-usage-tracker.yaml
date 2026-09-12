@@ -1,0 +1,31 @@
+# Catalog entry for NousResearch/hermes-agent → plugin-catalog/ai-usage-tracker.yaml
+#
+# PR checklist (see plugin-catalog/README.md + the plugin-catalog user guide):
+#   1. owner-submitted — the PR author owns/maintains the repo below
+#   2. public repository — repo is publicly cloneable
+#   3. released — the repo has real releases/tags, not just a default branch
+#   4. validation green — the catalog validation Action passes on the PR
+#   5. settled pin — the pinned commit is at least 2 weeks old at review time
+#   6. capabilities below match what the plugin actually registers at that commit
+#      (this plugin registers no tools/hooks/middleware — `hermes plugins validate` agrees)
+#
+# REPLACE the placeholder sha with the tagged release commit (40 hex, quoted):
+#   git rev-parse v1.0.0^{commit}
+# Keep the quotes: an all-digit SHA would otherwise parse as a YAML integer and
+# lose leading zeros, failing validation.
+name: ai-usage-tracker
+repo: https://github.com/lvabarajithan/hermes-ai-usage-tracker
+sha: "0000000000000000000000000000000000000000"
+description: Live subscription-quota windows for every AI provider Hermes can route to, as a
+  desktop page plus status-bar chip, with per-profile picker — Codex, Claude, Copilot, OpenCode
+  Go/Zen, Z.AI, Kimi, MiniMax, Nous, OpenRouter, DeepSeek.
+maintainer: lvabarajithan
+tier: community
+requires_hermes: ">=0.21"
+platforms: [linux, macos]
+docs_url: https://github.com/lvabarajithan/hermes-ai-usage-tracker
+capabilities:
+  provides_tools: []
+  provides_hooks: []
+  provides_middleware: []
+  requires_env: []

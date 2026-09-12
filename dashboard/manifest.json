@@ -1,0 +1,8 @@
+{
+  "name": "ai-usage-tracker",
+  "label": "AI Usage Tracker",
+  "description": "Subscription quota + token/cost usage across every AI provider Hermes supports",
+  "icon": "Graph",
+  "version": "1.0.0",
+  "api": "plugin_api.py"
+}
