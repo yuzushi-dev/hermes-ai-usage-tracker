@@ -15,7 +15,7 @@
 # lose leading zeros, failing validation.
 name: ai-usage-tracker
 repo: https://github.com/lvabarajithan/hermes-ai-usage-tracker
-sha: "0000000000000000000000000000000000000000"
+sha: "f666b46ccce3a5a18c47968745ec3ebc62c1865f"
 description: Live subscription-quota windows for every AI provider Hermes can route to, as a
   desktop page plus status-bar chip, with per-profile picker — Codex, Claude, Copilot, OpenCode
   Go/Zen, Z.AI, Kimi, MiniMax, Nous, OpenRouter, DeepSeek.
