@@ -10,12 +10,12 @@
 #      (this plugin registers no tools/hooks/middleware — `hermes plugins validate` agrees)
 #
 # REPLACE the placeholder sha with the tagged release commit (40 hex, quoted):
-#   git rev-parse v1.0.0^{commit}
+#   git rev-parse v1.0.1^{commit}
 # Keep the quotes: an all-digit SHA would otherwise parse as a YAML integer and
 # lose leading zeros, failing validation.
 name: ai-usage-tracker
 repo: https://github.com/lvabarajithan/hermes-ai-usage-tracker
-sha: "f666b46ccce3a5a18c47968745ec3ebc62c1865f"
+sha: "98010ea3fb2ce037cc5889bc4787e0152da69745"
 description: Live subscription-quota windows for every AI provider Hermes can route to, as a
   desktop page plus status-bar chip, with per-profile picker — Codex, Claude, Copilot, OpenCode
   Go/Zen, Z.AI, Kimi, MiniMax, Nous, OpenRouter, DeepSeek.
