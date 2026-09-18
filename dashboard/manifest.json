@@ -3,6 +3,6 @@
   "label": "AI Usage Tracker",
   "description": "Live subscription-quota windows for every AI provider Hermes can route to, per profile",
   "icon": "Graph",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "api": "plugin_api.py"
 }

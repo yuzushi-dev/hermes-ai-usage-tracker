@@ -54,6 +54,23 @@ const $hidden = atom([])
 const PROFILE_KEY = 'selected-profile-v1'
 const $profile = atom('')
 
+// Which provider the status-bar chip watches. Empty = AUTO: the worst remaining
+// window across every visible provider (the historical default). A provider id
+// pins the chip to that provider's own worst window; the page writes it.
+const CHIP_KEY = 'chip-provider-v1'
+const AUTO_CHIP = 'auto'
+const $chipProvider = atom('')
+
+function selectChipProvider(id) {
+  const value = String(id || '')
+  $chipProvider.set(value)
+  try {
+    storage?.set(CHIP_KEY, value)
+  } catch {
+    /* in-memory selection still works for this session */
+  }
+}
+
 function persistHidden(ids) {
   $hidden.set(ids)
   try {
@@ -139,18 +156,32 @@ function profileLabel(row) {
 }
 
 /** Worst (lowest) remaining percent across visible providers' windows — drives the chip. */
+/** One provider's tightest numeric window, or null when it reports none. */
+function worstWindowOf(provider) {
+  let worst = null
+  for (const window of provider?.quota?.windows || []) {
+    const remaining = window.remaining_percent
+    if (remaining === null || remaining === undefined) continue
+    if (worst === null || remaining < worst.remaining) {
+      worst = {
+        remaining,
+        provider: provider.label,
+        window: window.label,
+        reset_at: window.reset_at || null
+      }
+    }
+  }
+  return worst
+}
+
+/** AUTO pick: the tightest window across every provider that isn't hidden. */
 function worstRemaining(payload, hiddenIds) {
   const hidden = hiddenIds || []
   let worst = null
   for (const provider of payload?.providers || []) {
     if (hidden.includes(provider.id)) continue
-    for (const window of provider.quota?.windows || []) {
-      const remaining = window.remaining_percent
-      if (remaining === null || remaining === undefined) continue
-      if (worst === null || remaining < worst.remaining) {
-        worst = { remaining, provider: provider.label, window: window.label }
-      }
-    }
+    const candidate = worstWindowOf(provider)
+    if (candidate && (worst === null || candidate.remaining < worst.remaining)) worst = candidate
   }
   return worst
 }
@@ -294,7 +325,36 @@ function ProfilePicker({ profiles, value, onSelect }) {
   })
 }
 
-function PageHeader({ profiles, profile, setProfile, isFetching, refetch, meta, hiddenCount, showHidden, setShowHidden }) {
+/** Picks which provider the status-bar chip watches. AUTO_CHIP keeps the
+ *  historical behaviour (worst window across all visible providers); hidden
+ *  providers aren't offered because the chip skips them either way. */
+function ChipPicker({ providers, value, onSelect }) {
+  return jsxs(Select, {
+    value: value || AUTO_CHIP,
+    onValueChange: next => {
+      haptic('tap')
+      onSelect(next === AUTO_CHIP ? '' : next)
+    },
+    children: [
+      jsx(SelectTrigger, {
+        className: 'h-6 w-56 text-[0.6875rem]',
+        title: 'Which provider the status-bar chip shows',
+        'aria-label': 'Status bar chip provider',
+        children: jsx(SelectValue, {})
+      }),
+      jsx(SelectContent, {
+        children: [
+          jsx(SelectItem, { value: AUTO_CHIP, children: 'Auto (Lowest %)' }, AUTO_CHIP),
+          ...providers.map(provider =>
+            jsx(SelectItem, { value: provider.id, children: provider.label }, provider.id)
+          )
+        ]
+      })
+    ]
+  })
+}
+
+function PageHeader({ profiles, profile, setProfile, chipProviders, chipProvider, setChipProvider, isFetching, refetch, meta, hiddenCount, showHidden, setShowHidden }) {
   return jsxs('div', {
     className: 'flex flex-wrap items-center gap-2',
     children: [
@@ -328,6 +388,8 @@ function PageHeader({ profiles, profile, setProfile, isFetching, refetch, meta, 
             children: 'Unhide all'
           })
         : null,
+      jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-quaternary)', children: 'Status Bar:' }),
+      jsx(ChipPicker, { providers: chipProviders, value: chipProvider, onSelect: setChipProvider }),
       jsx(ProfilePicker, { profiles, value: profile, onSelect: setProfile }),
       jsxs(Button, {
         variant: 'secondary',
@@ -349,12 +411,16 @@ function UsagePage() {
   const selected = useValue($profile)
   const { data, error, isFetching, refetch } = useUsage(selected, REFRESH_PAGE_MS)
 
+  const chipProvider = useValue($chipProvider)
   const profiles = data?.profiles || []
   const shownProfile = selected || data?.profile || ''
   const header = jsx(PageHeader, {
     profiles,
     profile: shownProfile,
     setProfile: selectProfile,
+    chipProviders: (data?.providers || []).filter(provider => !hiddenIds.includes(provider.id)),
+    chipProvider,
+    setChipProvider: selectChipProvider,
     isFetching,
     refetch,
     hiddenCount: hiddenIds.length,
@@ -451,12 +517,26 @@ function UsagePage() {
 function UsageChip() {
   const hiddenIds = useValue($hidden)
   const selected = useValue($profile)
+  const pinnedId = useValue($chipProvider)
   const { data } = useUsage(selected, REFRESH_CHIP_MS)
-  const worst = worstRemaining(data, hiddenIds)
+
+  // A pin only wins while it resolves to a visible provider with a numeric
+  // window; hidden, absent for this profile, or quota-less falls back to AUTO
+  // instead of blanking the chip.
+  const visible = (data?.providers || []).filter(provider => !(hiddenIds || []).includes(provider.id))
+  const pinned = pinnedId ? visible.find(provider => provider.id === pinnedId) : null
+  const worst = (pinned ? worstWindowOf(pinned) : null) || worstRemaining(data, hiddenIds)
   const tone = toneFor(worst ? worst.remaining : null)
+  const detail = worst
+    ? [worst.provider, worst.window ? `${worst.window} window` : null, resetLabel(worst.reset_at)]
+        .filter(Boolean)
+        .join(' · ')
+    : 'AI usage'
 
   return jsx('button', {
     type: 'button',
+    title: `${detail}${pinned ? ' (pinned on the AI usage page)' : ''}`,
+    'aria-label': `AI usage: ${detail}`,
     className: 'px-1.5 text-[0.6875rem] text-(--ui-text-tertiary) hover:text-(--ui-text-secondary)',
     onClick: () => {
       haptic('tap')
@@ -494,6 +574,12 @@ export default {
       if (Array.isArray(saved)) $hidden.set(saved.filter(value => typeof value === 'string'))
     } catch {
       /* a malformed stored list must not block the plugin from loading */
+    }
+    try {
+      const savedChip = storage?.get(CHIP_KEY, '')
+      if (typeof savedChip === 'string') $chipProvider.set(savedChip)
+    } catch {
+      /* fall through to AUTO */
     }
     try {
       const savedProfile = storage?.get(PROFILE_KEY, '')
