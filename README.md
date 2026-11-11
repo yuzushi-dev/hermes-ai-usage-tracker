@@ -8,6 +8,12 @@ Live subscription-quota tracker for Hermes Desktop with granular sub-quota windo
 
 This independent community plugin is maintained at [yuzushi-dev/hermes-ai-usage-tracker](https://github.com/yuzushi-dev/hermes-ai-usage-tracker). Forked from the original work by [lvabarajithan/ai-usage-tracker](https://github.com/lvabarajithan/hermes-ai-usage-tracker) and expanded with discrete sub-quota models, zero-dependency token resolution, telemetry-backed metered usage, and Orca ADE multi-badge desktop integration.
 
+<p align="center">
+  <a href="https://raw.githubusercontent.com/yuzushi-dev/hermes-ai-usage-tracker/main/assets/hermes-ai-usage-tracker-promo.mp4">
+    <img src="assets/hermes-ai-usage-tracker-promo.gif" alt="Hermes AI Usage Tracker demo: real-time multi-provider quota tracking in status bar" width="960">
+  </a>
+</p>
+
 ---
 
 ## What it does
