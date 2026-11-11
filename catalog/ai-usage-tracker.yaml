@@ -14,16 +14,15 @@
 # Keep the quotes: an all-digit SHA would otherwise parse as a YAML integer and
 # lose leading zeros, failing validation.
 name: ai-usage-tracker
-repo: https://github.com/lvabarajithan/hermes-ai-usage-tracker
-sha: "14e844f6ced5e0d618c767d726330a78c5cadadd"
-description: Live subscription-quota windows for every AI provider Hermes can route to, as a
-  desktop page plus status-bar chip, with per-profile picker — Codex, Claude, Copilot, OpenCode
-  Go/Zen, Z.AI, Kimi, MiniMax, Nous, OpenRouter, DeepSeek.
-maintainer: lvabarajithan
+repo: https://github.com/yuzushi-dev/hermes-ai-usage-tracker
+sha: "219b05ee88c222ff4ee8b1961fa662bf36573c9f"
+description: Live subscription-quota aggregation with granular sub-quotas (AGY Gemini/Argon/Claude,
+  Claude standard & Fable, OpenAI Codex, Mistral telemetry) and Orca ADE-inspired status bar badges.
+maintainer: yuzushi-dev
 tier: community
 requires_hermes: ">=0.21"
 platforms: [linux, macos]
-docs_url: https://github.com/lvabarajithan/hermes-ai-usage-tracker
+docs_url: https://github.com/yuzushi-dev/hermes-ai-usage-tracker
 capabilities:
   provides_tools: []
   provides_hooks: []

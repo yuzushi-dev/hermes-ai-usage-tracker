@@ -1,101 +1,122 @@
-# AI Usage Tracker — Hermes desktop plugin
+# Hermes AI Usage Tracker
 
-Live **subscription quota** for every AI provider Hermes can route to, inside the Hermes
-desktop: a page (sidebar → *AI usage*), a status-bar chip showing the worst remaining
-window, and a per-profile picker.
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/yuzushi-dev/hermes-ai-usage-tracker/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Hermes: >=0.21](https://img.shields.io/badge/Hermes-%3E%3D0.21-purple.svg)](https://hermes-agent.nousresearch.com)
 
-Scope is deliberately narrow: **quota windows only** — provider, plan, window name,
-% remaining, reset countdown. No token counting, no cost estimates, no period filters.
+Live subscription-quota tracker for Hermes Desktop with granular sub-quota windows (Google Antigravity Gemini / Argon / Claude, Claude standard & Fable, OpenAI Codex, and Mistral telemetry) plus an Orca ADE-inspired multi-badge status bar.
 
-| Provider | Live quota endpoint |
-| --- | --- |
-| `openai-codex` | `chatgpt.com/backend-api/wham/usage` (session + weekly windows) |
-| `anthropic` | `api.anthropic.com/api/oauth/usage` (OAuth accounts only) |
-| `nous` | portal account (subscription credits + renewal) |
-| `openrouter` | `api/v1/credits` + `/key` (balance / key limit) |
-| `copilot` | `api.github.com/copilot_internal/user` |
-| `opencode-go` | `opencode.ai/zen/go/v1/usage` (rolling / weekly / monthly) |
-| `opencode-zen` | credits endpoint (pay-as-you-go) |
-| `zai` | `api.z.ai/api/monitor/usage/quota/limit` |
-| `kimi-coding` | `api.kimi.com/coding/v1/usages` |
-| `minimax` | `api.minimax.io/v1/api/openplatform/coding_plan/remains` |
-| `deepseek` | `api.deepseek.com/user/balance` |
+This independent community plugin is maintained at [yuzushi-dev/hermes-ai-usage-tracker](https://github.com/yuzushi-dev/hermes-ai-usage-tracker). Forked from the original work by [lvabarajithan/ai-usage-tracker](https://github.com/lvabarajithan/hermes-ai-usage-tracker) and expanded with discrete sub-quota models, zero-dependency token resolution, telemetry-backed metered usage, and Orca ADE multi-badge desktop integration.
 
-Providers with no quota API are listed with an explicit reason instead of a fabricated
-bar. Absence-path providers (Grok/SuperGrok, Gemini Code Assist OAuth, Cursor, Kiro) need
-browser cookies and are deliberately not attempted.
+---
+
+## What it does
+
+Hermes AI Usage Tracker gives you live, real-time visibility into your AI provider quotas without having to navigate menus or hunt through model selection dropdowns. It provides:
+
+- **Orca ADE-Style Multi-Badge Status Bar**: Displays live color-coded remaining percentages side-by-side in the bottom status bar (`● 100% Argon  ● 0% AGY Claude  ● 58% Gemini  ● 0% Claude  ● 100% Fable  ● 6% Codex  ● Metered Mistral`), with immediate reset countdown tooltips on hover.
+- **Granular Sub-Quota Separation**: Providers that share credentials but enforce separate quota allowances are decoupled into distinct cards and badges:
+  - **Google Antigravity (AGY)**: Separated into **`AGY Gemini`** (5h session + 7d weekly), **`AGY Argon`** (weekly pool), and **`AGY Claude / 3P`** (weekly + 5h) instead of an opaque aggregate number.
+  - **Claude (Anthropic)**: Decoupled into **`Claude`** (standard 5h session + 7d weekly) and a dedicated **`Claude Fable`** card/badge (weekly model-scoped quota), ensuring critical session exhaustion never masks Fable availability.
+  - **OpenAI Codex**: Live ChatGPT backend wham usage with session and weekly windows.
+  - **Mistral AI**: Dynamically recognizes your tier (`Mistral EDU` / Vibe / API) via `whoami`, monitors TPM/RPM rate limits, and surfaces real session token consumption from Hermes `state.db` without fabricating misleading percentages.
+- **Dedicated Dashboard Page (`/ai-usage`)**: Full cards for each provider showing progress bars, remaining percentage, exact local reset times, plan details, and single-click status bar pin/unpin toggles.
+- **Multi-Profile Scoping**: Switch seamlessly between local Hermes profiles (`default`, `penny`, `forge`, etc.) with thread-local context isolation—querying another profile's quota without modifying server credentials.
+
+---
+
+## Main Providers & Quota Endpoints
+
+| Provider | ID | Mode | Measured Allowance / Windows | Source |
+| --- | --- | --- | --- | --- |
+| **AGY Gemini** | `antigravity-agy-gemini` | Quota | 5h Session + 7d Weekly windows | `agy -p=/quota` CLI |
+| **AGY Argon** | `antigravity-agy-argon` | Quota | Weekly Gemini 4 Argon pool | `agy -p=/quota` CLI |
+| **AGY Claude** | `antigravity-agy-claude` | Quota | Weekly + 5h Claude/3P allowance | `agy -p=/quota` CLI |
+| **Claude** | `anthropic` | Quota | 5h Session + 7d Weekly utilization | `api.anthropic.com/api/oauth/usage` |
+| **Claude Fable** | `claude-fable` | Quota | Weekly scoped Fable model quota | `api.anthropic.com/api/oauth/usage` |
+| **OpenAI Codex** | `openai-codex` | Quota | Session + Weekly usage & resets | `chatgpt.com/backend-api/wham/usage` |
+| **Mistral AI** | `mistral-vibe` / `mistral` | Telemetry | EDU/Vibe tier, 7d tokens, 1M TPM, 2k RPM | `console.mistral.ai` + `state.db` |
+| **OpenRouter** | `openrouter` | Credits | Live credit balance & key limit | `openrouter.ai/api/v1/credits` |
+| **Nous Portal** | `nous` | Credits | Subscription credits & renewal date | Nous account portal |
+| **GitHub Copilot** | `copilot` | Quota | Internal user quota & allowance | `api.github.com/copilot_internal/user` |
+| **Z.AI / GLM** | `zai` | Quota | Live usage / quota / limit | `api.z.ai/api/monitor/usage/quota/limit` |
+| **DeepSeek** | `deepseek` | Balance | User account balance | `api.deepseek.com/user/balance` |
+| **Kimi Coding** | `kimi-coding` | Quota | Coding plan usage | `api.kimi.com/coding/v1/usages` |
+| **MiniMax** | `minimax` | Quota | Coding plan remains | `api.minimax.io/v1/...` |
+
+---
+
+## Status Bar Integration
+
+The status bar chip supports two distinct display modes (configured directly from the header dropdown in `/ai-usage`):
+
+1. **Multi-Badge (Orca ADE style)** *(Default)*:
+   Renders favorite or pinned providers side-by-side directly in the status bar:
+   ```text
+   ● 100% Argon  ● 0% AGY Claude  ● 58% Gemini  ● 0% Claude  ● 100% Fable  ● 6% Codex  ● Metered Mistral
+   ```
+   - Color-coded indicator dots: Green (healthy >25%), Orange (warning 5%–25%), Red/Accent (exhausted or low ≤5%), or Muted.
+   - Hover tooltips show exact window details, percentage left, and local reset times (`resets in 42m (12:50, 11 nov)`).
+   - Click anywhere on the status bar to jump straight to the `/ai-usage` dashboard.
+2. **Single Badge (Compact)**:
+   Displays a single compact pill tracking either the global **Auto** worst remaining quota across all providers or a specific pinned provider.
+
+Click the **Pin** icon on any provider card in `/ai-usage` to customize which badges are anchored to your status bar. Use the **Hide (eye)** icon to hide providers you don't use.
+
+---
 
 ## Install
 
-```bash
-# from the curated catalog (once merged):
-hermes plugins install ai-usage-tracker --enable
-
-# from this repo directly:
-hermes plugins install <owner>/<repo> --enable
-```
-
-Or ship an install link in any README/site:
-
-```html
-<a href="hermes://plugin/install?repo=<owner>/<repo>&enable=1">Install in Hermes</a>
-```
-
-Then enable it **for each profile** you want it in — desktop backends are profile-scoped,
-and a plugin enabled only in the default profile 404s on every other:
+Install directly from GitHub via the Hermes plugin manager:
 
 ```bash
-for p in forge jewel penny smoke teknium; do
-  ln -s ~/.hermes/plugins/ai-usage-tracker ~/.hermes/profiles/$p/plugins/ai-usage-tracker
+hermes plugins install https://github.com/yuzushi-dev/hermes-ai-usage-tracker.git --enable
+```
+
+Or enable it across multiple profiles:
+
+```bash
+for p in default forge jewel penny; do
   hermes --profile $p plugins enable ai-usage-tracker
 done
 ```
 
-Relaunch the desktop app after enabling (backend routes mount at web-server start).
+Reload Hermes Desktop (`Ctrl+R` or restart) to mount the new backend endpoints and load the desktop extension.
 
-## Profiles
+---
 
-The header picker lists **every profile on this machine** and probes the selected one:
-``GET /usage?profile=<name>`` runs the quota probes with that profile's `HERMES_HOME`
-bound through `hermes_constants`' context-local override, so credentials, `auth.json`
-and `.env` resolve for that profile — not the server's own. The chip follows the same
-selection, and the choice is persisted plugin-scoped.
+## Security & Architectural Boundaries
 
-Honest limits:
+- **Read-Only**: The backend performs strictly read-only inspection. It never modifies credentials, keys, or provider configurations.
+- **No Secret Exfiltration**: All authentication tokens (OAuth bearer tokens, API keys) are resolved in-process inside the backend service and **never sent to the client or serialized over the wire**. The API wire format carries only `configured: true/false`, source labels, and numeric quota metrics.
+- **Zero-Dependency Resilience**: Anthropic and Mistral token resolvers read directly from standard credential stores (`~/.claude/.credentials.json`, `~/.hermes/auth.json`, environment variables) with native fallback to Python standard library `urllib.request`. Probes remain fully operational even in constrained environments where external packages (like `ruamel` or `httpx`) are not in `sys.path`.
+- **Shared In-Memory Cache**: Outbound quota probes are cached in-process for 60 seconds (thread-safe lock) to prevent redundant remote requests when multiple sub-quotas share a single endpoint.
+- **Profile Boundary**: Each probe executes with the selected profile's `HERMES_HOME` bound via thread-local ContextVar overrides, ensuring that requests for secondary profiles do not touch the active runtime environment.
 
-- **Local machine only.** A profile that lives on a *remote* gateway (another machine
-  reached over Tailscale/SSH) cannot be read from this backend — the plugin's REST door
-  is profile-scoped to the serving machine, and the SDK exposes no cross-gateway route
-  to a plugin's own backend.
-- Credential lookup uses the profile's own home first and falls back to the server
-  process environment (exactly how Hermes itself resolves them for that profile).
+---
 
-## Hiding providers
+## Layout (One Package, Both SDKs)
 
-Each card has a **✕** control. Hidden providers leave the page and are excluded from the
-status-bar chip. The header's **`Hidden N`** toggle reveals them dimmed, with **Unhide all**
-to reset. The list persists through `ctx.storage`
-(`hermes.plugin.ai-usage-tracker.hidden-providers-v1`).
-
-## Layout (one package, both SDKs)
-
-```
-ai-usage-tracker/
-├── plugin.yaml              # agent half (no tools/hooks — declares nothing by design)
-├── __init__.py              # register(ctx) no-op; exists so plugins.enabled can gate it
+```text
+hermes-ai-usage-tracker/
+├── plugin.yaml              # Hermes plugin definition (v2.0.0)
+├── __init__.py              # register(ctx) entrypoint
 ├── dashboard/
 │   ├── manifest.json        # { "name": "ai-usage-tracker", "api": "plugin_api.py" }
-│   └── plugin_api.py        # FastAPI router → /api/plugins/ai-usage-tracker/{usage,profiles,health}
-└── desktop/
-    └── plugin.js            # desktop half; Electron copies it to desktop-plugins/<id>/
+│   └── plugin_api.py        # FastAPI router mounted at /api/plugins/ai-usage-tracker/
+├── desktop/
+│   └── plugin.js            # Hermes Desktop frontend with Orca ADE status bar & dashboard
+└── catalog/
+    └── ai-usage-tracker.yaml # Plugin catalog registration spec
 ```
 
-Endpoints: `GET /usage?profile=<name>&refresh=0|1`, `GET /profiles`, `GET /health`.
-Responses are cached in-process for 60s per profile; `refresh=1` bypasses.
+---
 
-## Privacy
+## Credits & Attribution
 
-- Read-only. Nothing is written except the plugin's own cache and the two UI prefs.
-- Credentials are resolved in-process and **never serialized**; the wire carries
-  `configured: true/false` and a source label only.
-- The only outbound calls are the provider quota endpoints above.
+Originally authored by [lvabarajithan](https://github.com/lvabarajithan/hermes-ai-usage-tracker) (v1.0.2). Forked, redesigned, and maintained by [yuzushi-dev](https://github.com/yuzushi-dev) (v2.0.0+) with:
+- Granular sub-quotas for Google Antigravity (Gemini, Argon, Claude).
+- Dedicated Claude Fable model quota isolation.
+- Zero-dependency OAuth credential resolution.
+- Live telemetry-backed Mistral EDU/Vibe tracking.
+- Orca ADE-inspired multi-badge status bar integration.
