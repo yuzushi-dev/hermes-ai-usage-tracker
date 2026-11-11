@@ -46,6 +46,8 @@ _FALLBACK_LABELS = {
     "nous": "Nous Portal",
     "openrouter": "OpenRouter",
     "anthropic": "Claude (Anthropic)",
+    "claude-fable": "Claude (Fable)",
+    "claude-subscription-directsdk-experimental": "Claude (Subscription)",
     "openai-codex": "OpenAI Codex",
     "copilot": "GitHub Copilot",
     "gemini": "Google AI Studio",
@@ -68,7 +70,8 @@ _FALLBACK_LABELS = {
 
 # Providers whose subscription quota can be read live.
 _QUOTA_CAPABLE = frozenset({
-    "anthropic", "openai-codex", "openrouter", "nous", "copilot",
+    "anthropic", "claude-fable", "claude-subscription-directsdk-experimental",
+    "openai-codex", "openrouter", "nous", "copilot",
     "opencode-go", "opencode-zen", "zai", "kimi-coding", "minimax", "deepseek",
     "antigravity-agy", "antigravity-agy-gemini", "antigravity-agy-argon", "antigravity-agy-claude",
     "mistral-vibe", "mistral",
@@ -777,33 +780,119 @@ def _probe_antigravity_all() -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------
-# Enhanced Anthropic Probe (with Fable and Scoped Limits support)
+# Enhanced Anthropic & Claude Fable Probes (Shared Cache & Robust Fallback)
 # --------------------------------------------------------------------------
 
+_anthropic_cache: dict[str, Any] = {}
+_anthropic_cache_time: float = 0.0
+_anthropic_cache_lock = threading.Lock()
 
-def _probe_anthropic() -> dict[str, Any]:
+
+def _resolve_claude_token(home: Optional[Path] = None) -> Optional[str]:
+    """Resolve Anthropic OAuth / API token with zero required external dependencies."""
+    # 1. Environment variables
+    for env_var in ("ANTHROPIC_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"):
+        val = (os.environ.get(env_var) or "").strip()
+        if val:
+            return val
+
+    # 2. Directly read ~/.claude/.credentials.json
+    claude_creds = Path.home() / ".claude" / ".credentials.json"
+    if claude_creds.is_file():
+        try:
+            import json
+
+            data = json.loads(claude_creds.read_text(encoding="utf-8"))
+            oauth = data.get("claudeAiOauth") or {}
+            tok = oauth.get("accessToken") or data.get("accessToken")
+            if tok and isinstance(tok, str) and tok.strip():
+                return tok.strip()
+        except Exception:
+            pass
+
+    # 3. Hermes PKCE in ~/.hermes/.anthropic_oauth.json
+    h_dir = home or Path.home() / ".hermes"
+    hermes_oauth = h_dir / ".anthropic_oauth.json"
+    if hermes_oauth.is_file():
+        try:
+            import json
+
+            data = json.loads(hermes_oauth.read_text(encoding="utf-8"))
+            tok = data.get("access_token") or data.get("accessToken")
+            if tok and isinstance(tok, str) and tok.strip():
+                return tok.strip()
+        except Exception:
+            pass
+
+    # 4. Fallback: try agent.anthropic_credentials if present in venv
     try:
-        from agent.anthropic_credentials import _is_oauth_token, resolve_anthropic_token
+        from agent.anthropic_credentials import resolve_anthropic_token
 
-        token = (resolve_anthropic_token() or "").strip()
-        if not token or not _is_oauth_token(token):
-            return _probe_standard("anthropic")
+        tok = resolve_anthropic_token()
+        if tok and isinstance(tok, str) and tok.strip():
+            return tok.strip()
+    except Exception:
+        pass
 
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "anthropic-beta": "oauth-2025-04-20",
-            "User-Agent": "claude-code/2.1.0",
-        }
+    return None
+
+
+def _fetch_anthropic_usage(home: Optional[Path] = None) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Fetch raw Anthropic usage JSON with 60s cache and urllib fallback."""
+    global _anthropic_cache, _anthropic_cache_time
+    now = time.time()
+    with _anthropic_cache_lock:
+        if _anthropic_cache and (now - _anthropic_cache_time) < _CACHE_TTL_SECONDS:
+            return _anthropic_cache, None
+
+    token = _resolve_claude_token(home)
+    if not token:
+        return None, "No Claude / Anthropic OAuth token found."
+    if not token.startswith("sk-ant-oat"):
+        return None, "Anthropic API key configured (quota limits require Claude OAuth subscription token)."
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "anthropic-beta": "oauth-2025-04-20",
+        "User-Agent": "claude-code/2.1.0",
+    }
+
+    # Try httpx first, then urllib.request
+    payload = None
+    try:
         with httpx.Client(timeout=_PROBE_TIMEOUT) as client:
             resp = client.get("https://api.anthropic.com/api/oauth/usage", headers=headers)
             if resp.status_code in (401, 403):
-                return _unavailable(f"Anthropic OAuth rejected (HTTP {resp.status_code})", source="oauth_usage_api")
+                return None, f"Anthropic OAuth rejected (HTTP {resp.status_code})"
             resp.raise_for_status()
             payload = resp.json() or {}
-    except Exception:  # noqa: BLE001
-        return _probe_standard("anthropic")
+    except Exception as exc_httpx:
+        try:
+            import json
+            import urllib.request
+
+            req = urllib.request.Request("https://api.anthropic.com/api/oauth/usage", headers=headers)
+            with urllib.request.urlopen(req, timeout=_PROBE_TIMEOUT) as u_resp:
+                raw = u_resp.read().decode("utf-8")
+                payload = json.loads(raw) or {}
+        except Exception as exc_urllib:
+            return None, f"Anthropic usage API error: {exc_httpx or exc_urllib}"
+
+    if payload:
+        with _anthropic_cache_lock:
+            _anthropic_cache = payload
+            _anthropic_cache_time = now
+        return payload, None
+
+    return None, "Anthropic returned empty payload."
+
+
+def _probe_anthropic() -> dict[str, Any]:
+    payload, err = _fetch_anthropic_usage()
+    if err or not payload:
+        return _unavailable(err or "No quota windows returned by Anthropic.", source="oauth_usage_api")
 
     windows: list[dict[str, Any]] = []
     # 1. 5h session
@@ -816,14 +905,14 @@ def _probe_anthropic() -> dict[str, Any]:
     if seven_day.get("utilization") is not None:
         windows.append(_window("Current week", float(seven_day["utilization"]), seven_day.get("resets_at")))
 
-    # 3. Model scoped limits (e.g. Fable, Opus, Sonnet) from limits array
+    # 3. Model scoped limits (Opus, Sonnet, etc. excluding Fable which has its own card)
     for item in payload.get("limits") or []:
         if not isinstance(item, dict):
             continue
         scope = item.get("scope") or {}
         model = scope.get("model") or {}
         display_name = model.get("display_name")
-        if display_name:
+        if display_name and "fable" not in display_name.lower():
             label = f"{display_name} week" if item.get("group") == "weekly" else str(display_name)
             windows.append(_window(label, float(item.get("percent", 0.0)), item.get("resets_at")))
 
@@ -852,6 +941,42 @@ def _probe_anthropic() -> dict[str, Any]:
         "windows": windows,
         "details": details,
         "unavailable_reason": None if windows else "No quota windows returned by Anthropic.",
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _probe_claude_fable() -> dict[str, Any]:
+    payload, err = _fetch_anthropic_usage()
+    if err or not payload:
+        return _unavailable(err or "No quota windows returned for Claude Fable.", source="oauth_usage_api")
+
+    windows: list[dict[str, Any]] = []
+    for item in payload.get("limits") or []:
+        if not isinstance(item, dict):
+            continue
+        scope = item.get("scope") or {}
+        model = scope.get("model") or {}
+        display_name = model.get("display_name", "")
+        if "fable" in display_name.lower():
+            label = f"{display_name} week" if item.get("group") == "weekly" else str(display_name)
+            windows.append(_window(label, float(item.get("percent", 0.0)), item.get("resets_at")))
+
+    if not windows:
+        for item in payload.get("limits") or []:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name", "")
+            if "fable" in name.lower():
+                windows.append(_window("Fable week", float(item.get("percent", 0.0)), item.get("resets_at")))
+
+    return {
+        "available": bool(windows),
+        "source": "oauth_usage_api",
+        "title": "Claude (Fable) Limits",
+        "plan": "Claude Fable",
+        "windows": windows,
+        "details": ["Dedicated weekly rate limit for Claude Fable."],
+        "unavailable_reason": None if windows else "No Fable quota reported in this Anthropic plan.",
         "fetched_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -887,6 +1012,8 @@ def _probe_mistral() -> dict[str, Any]:
 
 _PROBES: dict[str, Callable[[], dict[str, Any]]] = {
     "anthropic": _probe_anthropic,
+    "claude-fable": _probe_claude_fable,
+    "claude-subscription-directsdk-experimental": _probe_anthropic,
     "openai-codex": lambda: _probe_standard("openai-codex"),
     "openrouter": lambda: _probe_standard("openrouter"),
     "nous": _probe_nous,
@@ -944,14 +1071,11 @@ def _configured_providers() -> set[str]:
             "antigravity-agy-claude",
         })
 
-    # Anthropic OAuth check
-    try:
-        from agent.anthropic_credentials import resolve_anthropic_token
-
-        if resolve_anthropic_token():
-            configured.add("anthropic")
-    except Exception:  # noqa: BLE001
-        pass
+    # Anthropic OAuth check (with zero-dep fallback)
+    if _resolve_claude_token():
+        configured.add("anthropic")
+        configured.add("claude-fable")
+        configured.add("claude-subscription-directsdk-experimental")
 
     # Mistral checks
     if "mistral-vibe" in configured or os.environ.get("MISTRAL_API_KEY") or os.environ.get("MISTRAL_VIBE_API_KEY"):
@@ -994,6 +1118,10 @@ def _build_payload(home: Optional[Path], profile_name: Optional[str]) -> dict[st
     sub_agy = {"antigravity-agy-gemini", "antigravity-agy-argon", "antigravity-agy-claude"}
     if any(s in names for s in sub_agy):
         names = [pid for pid in names if pid != "antigravity-agy"]
+
+    # When both "claude-subscription-directsdk-experimental" and "anthropic" are present, collapse to "anthropic"
+    if "anthropic" in names and "claude-subscription-directsdk-experimental" in names:
+        names = [pid for pid in names if pid != "claude-subscription-directsdk-experimental"]
 
     providers = []
     for pid in names:

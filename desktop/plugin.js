@@ -66,7 +66,9 @@ const $chipProvider = atom('')
 const DEFAULT_FAVORITES = [
   'antigravity-agy-argon',
   'antigravity-agy-gemini',
+  'antigravity-agy-claude',
   'anthropic',
+  'claude-fable',
   'openai-codex'
 ]
 
@@ -192,7 +194,8 @@ function compactLabel(provider) {
   if (id === 'antigravity-agy-argon') return 'Argon'
   if (id === 'antigravity-agy-gemini') return 'Gemini'
   if (id === 'antigravity-agy-claude') return 'AGY Claude'
-  if (id === 'anthropic') return 'Claude'
+  if (id === 'claude-fable') return 'Fable'
+  if (id === 'anthropic' || id === 'claude-subscription-directsdk-experimental') return 'Claude'
   if (id === 'openai-codex') return 'Codex'
   if (id.includes('mistral')) return 'Mistral'
   return (provider?.label || id).replace(/^(AGY|Google|OpenAI|GitHub)\s*/i, '')
@@ -703,7 +706,7 @@ function UsageChip() {
       ? visible.filter(p => pinnedList.includes(p.id))
       : visible.filter(p => DEFAULT_FAVORITES.includes(p.id))
 
-  const items = (activeTargets.length > 0 ? activeTargets : visible.filter(p => p.quota?.available)).slice(0, 5)
+  const items = activeTargets.length > 0 ? activeTargets : visible.filter(p => p.quota?.available)
 
   if (!items.length) {
     return jsx('button', {
