@@ -982,8 +982,55 @@ def _probe_claude_fable() -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------
-# Mistral Probe
+# Mistral Probe (Dynamic Plan from whoami + Local Hermes Token Telemetry)
 # --------------------------------------------------------------------------
+
+
+def _fetch_mistral_whoami(key: str) -> dict[str, Any]:
+    try:
+        import json
+        import urllib.request
+
+        req = urllib.request.Request(
+            "https://console.mistral.ai/api/vibe/whoami",
+            headers={"Authorization": f"Bearer {key}", "User-Agent": "hermes-ai-usage-tracker/2.0"},
+        )
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            return json.loads(resp.read().decode("utf-8")) or {}
+    except Exception:
+        return {}
+
+
+def _mistral_local_usage(home: Optional[Path] = None, days: int = 7) -> dict[str, Any]:
+    h_dir = home or _hermes_home()
+    db_path = h_dir / "state.db"
+    if not db_path.is_file():
+        return {"calls": 0, "total_tokens": 0}
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).timestamp()
+    try:
+        with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=3.0)) as conn:
+            r = conn.execute(
+                """
+                SELECT COALESCE(SUM(api_call_count), 0),
+                       COALESCE(SUM(input_tokens), 0),
+                       COALESCE(SUM(output_tokens), 0),
+                       COALESCE(SUM(cache_read_tokens), 0)
+                FROM session_model_usage 
+                WHERE billing_provider LIKE '%mistral%' AND last_seen >= ?
+                """,
+                (cutoff,),
+            ).fetchone()
+            if r:
+                return {
+                    "calls": int(r[0]),
+                    "input_tokens": int(r[1]),
+                    "output_tokens": int(r[2]),
+                    "cache_read_tokens": int(r[3]),
+                    "total_tokens": int(r[1] + r[2] + r[3]),
+                }
+    except Exception:
+        pass
+    return {"calls": 0, "total_tokens": 0}
 
 
 def _probe_mistral() -> dict[str, Any]:
@@ -993,17 +1040,34 @@ def _probe_mistral() -> dict[str, Any]:
     if not key:
         return _unavailable("No Mistral API key (MISTRAL_API_KEY / MISTRAL_VIBE_API_KEY) in this profile.", source="mistral_api")
 
+    whoami = _fetch_mistral_whoami(key)
+    plan_name = whoami.get("plan_name")
+    plan_title = f"Mistral {plan_name} (Vibe / Le Chat Pro)" if plan_name else "Mistral Pay-As-You-Go / Vibe"
+
+    usage = _mistral_local_usage(days=7)
+    calls = usage.get("calls", 0)
+    total_tokens = usage.get("total_tokens", 0)
+
+    windows = [
+        _window("Plan Allowance", None, None, "Metered (no public balance API)"),
+    ]
+    if calls > 0 or total_tokens > 0:
+        windows.append(_window("Hermes Usage (7d)", None, None, f"{total_tokens / 1_000_000:.1f}M tokens ({calls:,} calls)"))
+    windows.extend([
+        _window("Rate Limit (TPM)", None, None, "1,000,000 tokens/min"),
+        _window("Rate Limit (RPM)", None, None, "2,000 req/min"),
+    ])
+
     return {
         "available": True,
         "source": "api_key",
         "title": "Mistral AI",
-        "plan": "Pay-As-You-Go / Vibe",
-        "windows": [
-            _window("API Status", 0.0, None, "Key active · Pay-as-you-go")
-        ],
+        "plan": plan_title,
+        "windows": windows,
         "details": [
-            "Mistral operates on pay-as-you-go credits / model-tier rate limits.",
-            "Key configured and ready for chat / vibe turns."
+            "Mistral operates on token-metered / pay-as-you-go billing with per-minute rate limits.",
+            "Mistral API does not provide a public remaining-credit balance endpoint for individual/EDU tiers.",
+            "Local session telemetry tracks consumption across Hermes turns.",
         ],
         "unavailable_reason": None,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
@@ -1122,6 +1186,10 @@ def _build_payload(home: Optional[Path], profile_name: Optional[str]) -> dict[st
     # When both "claude-subscription-directsdk-experimental" and "anthropic" are present, collapse to "anthropic"
     if "anthropic" in names and "claude-subscription-directsdk-experimental" in names:
         names = [pid for pid in names if pid != "claude-subscription-directsdk-experimental"]
+
+    # When both "mistral-vibe" and "mistral" are present, collapse to "mistral-vibe"
+    if "mistral" in names and "mistral-vibe" in names:
+        names = [pid for pid in names if pid != "mistral"]
 
     providers = []
     for pid in names:

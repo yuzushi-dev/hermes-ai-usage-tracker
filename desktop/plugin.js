@@ -730,12 +730,12 @@ function UsageChip() {
     },
     children: items.map(provider => {
       const worst = worstWindowOf(provider)
-      const tone = toneFor(worst ? worst.remaining : null)
+      const tone = worst ? toneFor(worst.remaining) : (provider.quota?.available ? 'good' : 'muted')
       const label = compactLabel(provider)
-      const pctText = worst ? pct(worst.remaining) : '—'
+      const pctText = worst ? pct(worst.remaining) : (provider.quota?.available ? 'Metered' : '—')
       const tooltip = worst
         ? `${provider.label}: ${worst.window || 'Window'} (${pctText} left) · ${resetLabel(worst.reset_at) || 'resets soon'}`
-        : `${provider.label}`
+        : `${provider.label}: ${provider.quota?.plan || 'Active'}`
 
       return jsxs(
         'span',
