@@ -7,11 +7,11 @@
 set -uo pipefail
 
 UPSTREAM="NousResearch/hermes-agent"
-FORK="lvabarajithan/hermes-agent"
+FORK="yuzushi-dev/hermes-agent"
 BRANCH="add-ai-usage-tracker"
 ENTRY_PATH="plugin-catalog/ai-usage-tracker.yaml"
-PIN_SHA="98010ea3fb2ce037cc5889bc4787e0152da69745"
-PIN_DATE="2026-09-12T17:53:20Z"   # v1.0.1 commit time (UTC)
+PIN_SHA="219b05ee88c222ff4ee8b1961fa662bf36573c9f"
+PIN_DATE="2026-11-11T10:00:00Z"   # v2.0.0 commit time (UTC)
 
 echo "== pin =="
 echo "sha:          $PIN_SHA"
@@ -31,7 +31,7 @@ fi
 
 echo
 echo "== existing PR =="
-if EXISTING=$(gh pr list --repo "$UPSTREAM" --head "lvabarajithan:$BRANCH" --state all \
+if EXISTING=$(gh pr list --repo "$UPSTREAM" --head "yuzushi-dev:$BRANCH" --state all \
       --json url,state --jq '.[] | "\(.state)\t\(.url)"' 2>/dev/null) && [ -n "$EXISTING" ]; then
   echo "$EXISTING"
 else

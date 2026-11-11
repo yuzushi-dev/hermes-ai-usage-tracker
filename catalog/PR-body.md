@@ -4,8 +4,8 @@ Adds one entry to the Hermes plugin catalog:
 
 ```yaml
 name: ai-usage-tracker
-repo: https://github.com/lvabarajithan/hermes-ai-usage-tracker
-sha: "f666b46ccce3a5a18c47968745ec3ebc62c1865f"   # v1.0.0
+repo: https://github.com/yuzushi-dev/hermes-ai-usage-tracker
+sha: "219b05ee88c222ff4ee8b1961fa662bf36573c9f"   # v2.0.0
 tier: community
 ```
 
@@ -26,7 +26,7 @@ remaining window, and a per-profile picker.
 
 ## Submission checklist
 
-- [x] Owner-submitted (`lvabarajithan` owns the repo)
+- [x] Owner-submitted (`yuzushi-dev` owns the repo)
 - [x] Public repository
 - [x] Released (tag `v1.0.0` + GitHub release)
 - [x] Capabilities declared: none — the plugin registers no tools, hooks, or middleware;
@@ -39,7 +39,7 @@ remaining window, and a per-profile picker.
 ## Verify locally
 
 ```bash
-hermes plugins install lvabarajithan/hermes-ai-usage-tracker --enable
+hermes plugins install yuzushi-dev/hermes-ai-usage-tracker --enable
 hermes plugins validate ~/.hermes/plugins/ai-usage-tracker
 ```
 

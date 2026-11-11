@@ -6,7 +6,7 @@
 
 Live subscription-quota tracker for Hermes Desktop with granular sub-quota windows (Google Antigravity Gemini / Argon / Claude, Claude standard & Fable, OpenAI Codex, and Mistral telemetry) plus an Orca ADE-inspired multi-badge status bar.
 
-This independent community plugin is maintained at [yuzushi-dev/hermes-ai-usage-tracker](https://github.com/yuzushi-dev/hermes-ai-usage-tracker). Forked from the original work by [lvabarajithan/ai-usage-tracker](https://github.com/lvabarajithan/hermes-ai-usage-tracker) and expanded with discrete sub-quota models, zero-dependency token resolution, telemetry-backed metered usage, and Orca ADE multi-badge desktop integration.
+This independent community plugin is maintained at [yuzushi-dev/hermes-ai-usage-tracker](https://github.com/yuzushi-dev/hermes-ai-usage-tracker), featuring discrete sub-quota models, zero-dependency token resolution, telemetry-backed metered usage, and Orca ADE multi-badge desktop integration.
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/yuzushi-dev/hermes-ai-usage-tracker/main/assets/hermes-ai-usage-tracker-promo.mp4">
@@ -120,7 +120,7 @@ hermes-ai-usage-tracker/
 
 ## Credits & Attribution
 
-Originally authored by [lvabarajithan](https://github.com/lvabarajithan/hermes-ai-usage-tracker) (v1.0.2). Forked, redesigned, and maintained by [yuzushi-dev](https://github.com/yuzushi-dev) (v2.0.0+) with:
+Authored and maintained by [yuzushi-dev](https://github.com/yuzushi-dev) with:
 - Granular sub-quotas for Google Antigravity (Gemini, Argon, Claude).
 - Dedicated Claude Fable model quota isolation.
 - Zero-dependency OAuth credential resolution.
