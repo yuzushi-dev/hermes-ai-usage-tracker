@@ -45,10 +45,16 @@ _cache: dict[str, Any] = {}
 _FALLBACK_LABELS = {
     "nous": "Nous Portal",
     "openrouter": "OpenRouter",
-    "anthropic": "Anthropic",
-    "openai-codex": "ChatGPT or Codex Subscription",
+    "anthropic": "Claude (Anthropic)",
+    "openai-codex": "OpenAI Codex",
     "copilot": "GitHub Copilot",
     "gemini": "Google AI Studio",
+    "antigravity-agy": "Google Antigravity (AGY)",
+    "antigravity-agy-gemini": "AGY (Gemini)",
+    "antigravity-agy-argon": "AGY (Argon)",
+    "antigravity-agy-claude": "AGY (Claude / 3P)",
+    "mistral-vibe": "Mistral (Vibe)",
+    "mistral": "Mistral AI",
     "zai": "Z.AI / GLM",
     "minimax": "MiniMax",
     "kimi-coding": "Kimi / Kimi Coding Plan",
@@ -64,6 +70,8 @@ _FALLBACK_LABELS = {
 _QUOTA_CAPABLE = frozenset({
     "anthropic", "openai-codex", "openrouter", "nous", "copilot",
     "opencode-go", "opencode-zen", "zai", "kimi-coding", "minimax", "deepseek",
+    "antigravity-agy", "antigravity-agy-gemini", "antigravity-agy-argon", "antigravity-agy-claude",
+    "mistral-vibe", "mistral",
 })
 
 _ENV_HINTS = {
@@ -84,6 +92,12 @@ _ENV_HINTS = {
     "alibaba": "DASHSCOPE_API_KEY",
     "xiaomi": "XIAOMI_API_KEY",
     "nous": "NOUS_API_KEY",
+    "antigravity-agy": "ANTIGRAVITY_AGY_COMMAND",
+    "antigravity-agy-gemini": "ANTIGRAVITY_AGY_COMMAND",
+    "antigravity-agy-argon": "ANTIGRAVITY_AGY_COMMAND",
+    "antigravity-agy-claude": "ANTIGRAVITY_AGY_COMMAND",
+    "mistral": "MISTRAL_API_KEY",
+    "mistral-vibe": "MISTRAL_VIBE_API_KEY",
 }
 
 
@@ -176,14 +190,18 @@ def _resolve_profile(name: Optional[str]) -> tuple[Optional[Path], Optional[str]
 
 
 def _provider_labels() -> dict[str, str]:
+    labels = dict(_FALLBACK_LABELS)
     try:
         from hermes_cli.models_catalog_static import _PROVIDER_LABELS  # type: ignore
 
-        labels = {str(k): str(v) for k, v in dict(_PROVIDER_LABELS).items()}
-        return labels or dict(_FALLBACK_LABELS)
+        static_labels = {str(k): str(v) for k, v in dict(_PROVIDER_LABELS).items()}
+        labels.update(static_labels)
+        # Ensure our custom granular labels always take precedence or are present
+        labels.update(_FALLBACK_LABELS)
+        return labels
     except Exception:  # noqa: BLE001
         log.debug("provider catalog unavailable, using fallback labels", exc_info=True)
-        return dict(_FALLBACK_LABELS)
+        return labels
 
 
 def _normalize_provider(raw: str) -> str:
@@ -192,7 +210,13 @@ def _normalize_provider(raw: str) -> str:
         return "unattributed"
     if value.startswith("custom:"):
         return "custom"
-    aliases = {"openai": "openai-api", "gemini-code-assist": "gemini", "glm": "zai", "moonshot": "kimi-coding"}
+    aliases = {
+        "openai": "openai-api",
+        "gemini-code-assist": "gemini",
+        "glm": "zai",
+        "moonshot": "kimi-coding",
+        "claude-subscription-directsdk-experimental": "anthropic",
+    }
     return aliases.get(value, value)
 
 
@@ -217,7 +241,13 @@ def _active_providers(days: int = _ACTIVITY_WINDOW_DAYS) -> tuple[set[str], dict
         pid = _normalize_provider(billing_provider)
         if pid == "unattributed":
             continue
-        last_seen[pid] = max(last_seen.get(pid, 0.0), float(seen or 0.0))
+        ts = max(last_seen.get(pid, 0.0), float(seen or 0.0))
+        last_seen[pid] = ts
+        if pid == "antigravity-agy":
+            for sub in ("antigravity-agy-gemini", "antigravity-agy-argon", "antigravity-agy-claude"):
+                last_seen[sub] = max(last_seen.get(sub, 0.0), ts)
+        elif pid == "mistral-vibe":
+            last_seen["mistral"] = max(last_seen.get("mistral", 0.0), ts)
     return set(last_seen), last_seen
 
 
@@ -601,8 +631,262 @@ def _probe_deepseek() -> dict[str, Any]:
             "fetched_at": datetime.now(timezone.utc).isoformat()}
 
 
+# --------------------------------------------------------------------------
+# Antigravity (AGY) Probe
+# --------------------------------------------------------------------------
+
+_agy_cache_lock = threading.Lock()
+_agy_raw_cache: dict[str, Any] = {"at": 0.0, "data": None, "error": None}
+_AGY_CACHE_TTL = 30.0
+
+
+def _get_agy_command() -> Optional[str]:
+    import shutil
+    cmd = os.environ.get("ANTIGRAVITY_AGY_COMMAND")
+    if cmd and os.path.exists(cmd):
+        return cmd
+    candidate = Path.home() / ".local/bin/agy"
+    if candidate.is_file():
+        return str(candidate)
+    return shutil.which("agy")
+
+
+def _fetch_agy_raw_data() -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    import subprocess
+    import json
+
+    now = time.time()
+    with _agy_cache_lock:
+        if _agy_raw_cache["data"] is not None and (now - _agy_raw_cache["at"]) < _AGY_CACHE_TTL:
+            return _agy_raw_cache["data"], _agy_raw_cache["error"]
+        if _agy_raw_cache["error"] is not None and (now - _agy_raw_cache["at"]) < 10.0:
+            return None, _agy_raw_cache["error"]
+
+    agy_bin = _get_agy_command()
+    if not agy_bin:
+        err = "Antigravity CLI ('agy') not found on PATH or ~/.local/bin/agy."
+        with _agy_cache_lock:
+            _agy_raw_cache.update({"at": time.time(), "data": None, "error": err})
+        return None, err
+
+    try:
+        proc = subprocess.run(
+            [agy_bin, "-p=/quota", "--output-format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=_PROBE_TIMEOUT,
+        )
+        if proc.returncode != 0:
+            err = f"agy -p=/quota exited with code {proc.returncode}: {proc.stderr[:160]}"
+            with _agy_cache_lock:
+                _agy_raw_cache.update({"at": time.time(), "data": None, "error": err})
+            return None, err
+        data = json.loads(proc.stdout)
+        with _agy_cache_lock:
+            _agy_raw_cache.update({"at": time.time(), "data": data, "error": None})
+        return data, None
+    except Exception as exc:  # noqa: BLE001
+        err = f"agy quota probe failed: {type(exc).__name__}: {exc}"
+        with _agy_cache_lock:
+            _agy_raw_cache.update({"at": time.time(), "data": None, "error": err})
+        return None, err
+
+
+def _parse_agy_group(group_filter: str, title: str, plan: str = "Google Antigravity") -> dict[str, Any]:
+    data, err = _fetch_agy_raw_data()
+    if err or not data:
+        return _unavailable(err or "No AGY quota data returned.", source="agy_cli")
+
+    groups = data.get("command", {}).get("data", {}).get("groups", [])
+    target = [g for g in groups if group_filter.lower() in str(g.get("name", "")).lower()]
+    if not target:
+        return _unavailable(f"Group '{group_filter}' not found in AGY quota.", source="agy_cli")
+
+    windows: list[dict[str, Any]] = []
+    details: list[str] = []
+    for g in target:
+        desc = g.get("description")
+        if desc and desc not in details:
+            details.append(desc)
+        for b in g.get("buckets", []):
+            name = b.get("name") or "Limit"
+            rem_frac = b.get("remaining_fraction")
+            disabled = bool(b.get("disabled", False))
+            reset_time = b.get("reset_time")
+            window_type = str(b.get("window") or "").lower()
+
+            label = name.replace("Limit", "").replace("Remaining", "").strip() or name
+            if window_type == "5h" and "5h" not in label.lower() and "five" not in label.lower():
+                label = f"{label} (5h)"
+            elif window_type == "weekly" and "weekly" not in label.lower():
+                label = f"{label} (Weekly)"
+
+            if disabled:
+                windows.append(_window(label, 100.0, reset_time, detail="disabled (quota exhausted)"))
+            elif rem_frac is not None:
+                rem_pct = float(rem_frac) * 100.0
+                windows.append(_window(label, max(0.0, min(100.0, 100.0 - rem_pct)), reset_time))
+
+    if not windows:
+        return _unavailable("No bucket windows found in AGY group.", source="agy_cli")
+
+    return {
+        "available": True,
+        "source": "agy_cli",
+        "title": title,
+        "plan": plan,
+        "windows": windows,
+        "details": details,
+        "unavailable_reason": None,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _probe_antigravity_all() -> dict[str, Any]:
+    data, err = _fetch_agy_raw_data()
+    if err or not data:
+        return _unavailable(err or "No AGY quota data returned.", source="agy_cli")
+
+    groups = data.get("command", {}).get("data", {}).get("groups", [])
+    windows: list[dict[str, Any]] = []
+    details: list[str] = []
+    for g in groups:
+        gname = g.get("name") or "AGY"
+        for b in g.get("buckets", []):
+            bname = b.get("name") or "Limit"
+            rem_frac = b.get("remaining_fraction")
+            disabled = bool(b.get("disabled", False))
+            reset_time = b.get("reset_time")
+            label = f"{gname} · {bname.replace('Limit', '').replace('Remaining', '').strip()}"
+            if disabled:
+                windows.append(_window(label, 100.0, reset_time, detail="disabled (quota exhausted)"))
+            elif rem_frac is not None:
+                rem_pct = float(rem_frac) * 100.0
+                windows.append(_window(label, max(0.0, min(100.0, 100.0 - rem_pct)), reset_time))
+
+    return {
+        "available": bool(windows),
+        "source": "agy_cli",
+        "title": "Google Antigravity Limits",
+        "plan": "Google Antigravity",
+        "windows": windows,
+        "details": details,
+        "unavailable_reason": None if windows else "No quota groups returned.",
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# --------------------------------------------------------------------------
+# Enhanced Anthropic Probe (with Fable and Scoped Limits support)
+# --------------------------------------------------------------------------
+
+
+def _probe_anthropic() -> dict[str, Any]:
+    try:
+        from agent.anthropic_credentials import _is_oauth_token, resolve_anthropic_token
+
+        token = (resolve_anthropic_token() or "").strip()
+        if not token or not _is_oauth_token(token):
+            return _probe_standard("anthropic")
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "anthropic-beta": "oauth-2025-04-20",
+            "User-Agent": "claude-code/2.1.0",
+        }
+        with httpx.Client(timeout=_PROBE_TIMEOUT) as client:
+            resp = client.get("https://api.anthropic.com/api/oauth/usage", headers=headers)
+            if resp.status_code in (401, 403):
+                return _unavailable(f"Anthropic OAuth rejected (HTTP {resp.status_code})", source="oauth_usage_api")
+            resp.raise_for_status()
+            payload = resp.json() or {}
+    except Exception:  # noqa: BLE001
+        return _probe_standard("anthropic")
+
+    windows: list[dict[str, Any]] = []
+    # 1. 5h session
+    five_hour = payload.get("five_hour") or {}
+    if five_hour.get("utilization") is not None:
+        windows.append(_window("Current session", float(five_hour["utilization"]), five_hour.get("resets_at")))
+
+    # 2. 7d weekly
+    seven_day = payload.get("seven_day") or {}
+    if seven_day.get("utilization") is not None:
+        windows.append(_window("Current week", float(seven_day["utilization"]), seven_day.get("resets_at")))
+
+    # 3. Model scoped limits (e.g. Fable, Opus, Sonnet) from limits array
+    for item in payload.get("limits") or []:
+        if not isinstance(item, dict):
+            continue
+        scope = item.get("scope") or {}
+        model = scope.get("model") or {}
+        display_name = model.get("display_name")
+        if display_name:
+            label = f"{display_name} week" if item.get("group") == "weekly" else str(display_name)
+            windows.append(_window(label, float(item.get("percent", 0.0)), item.get("resets_at")))
+
+    # 4. Fallback for opus / sonnet if not present in limits
+    if not any("opus" in w["label"].lower() for w in windows):
+        opus = payload.get("seven_day_opus") or {}
+        if opus.get("utilization") is not None:
+            windows.append(_window("Opus week", float(opus["utilization"]), opus.get("resets_at")))
+    if not any("sonnet" in w["label"].lower() for w in windows):
+        sonnet = payload.get("seven_day_sonnet") or {}
+        if sonnet.get("utilization") is not None:
+            windows.append(_window("Sonnet week", float(sonnet["utilization"]), sonnet.get("resets_at")))
+
+    details: list[str] = []
+    extra = payload.get("extra_usage") or {}
+    used_credits, monthly_limit = extra.get("used_credits"), extra.get("monthly_limit")
+    if extra.get("is_enabled") and isinstance(used_credits, (int, float)) and isinstance(monthly_limit, (int, float)):
+        currency = extra.get("currency") or "USD"
+        details.append(f"Extra usage: {used_credits:.2f} / {monthly_limit:.2f} {currency}")
+
+    return {
+        "available": bool(windows),
+        "source": "oauth_usage_api",
+        "title": "Claude (Anthropic) Limits",
+        "plan": "Claude Pro / Team / Max",
+        "windows": windows,
+        "details": details,
+        "unavailable_reason": None if windows else "No quota windows returned by Anthropic.",
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# --------------------------------------------------------------------------
+# Mistral Probe
+# --------------------------------------------------------------------------
+
+
+def _probe_mistral() -> dict[str, Any]:
+    key = os.environ.get("MISTRAL_API_KEY") or os.environ.get("MISTRAL_VIBE_API_KEY")
+    if not key:
+        key = _runtime_key("mistral-vibe") or _runtime_key("mistral")
+    if not key:
+        return _unavailable("No Mistral API key (MISTRAL_API_KEY / MISTRAL_VIBE_API_KEY) in this profile.", source="mistral_api")
+
+    return {
+        "available": True,
+        "source": "api_key",
+        "title": "Mistral AI",
+        "plan": "Pay-As-You-Go / Vibe",
+        "windows": [
+            _window("API Status", 0.0, None, "Key active · Pay-as-you-go")
+        ],
+        "details": [
+            "Mistral operates on pay-as-you-go credits / model-tier rate limits.",
+            "Key configured and ready for chat / vibe turns."
+        ],
+        "unavailable_reason": None,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 _PROBES: dict[str, Callable[[], dict[str, Any]]] = {
-    "anthropic": lambda: _probe_standard("anthropic"),
+    "anthropic": _probe_anthropic,
     "openai-codex": lambda: _probe_standard("openai-codex"),
     "openrouter": lambda: _probe_standard("openrouter"),
     "nous": _probe_nous,
@@ -613,6 +897,12 @@ _PROBES: dict[str, Callable[[], dict[str, Any]]] = {
     "kimi-coding": _probe_kimi,
     "minimax": _probe_minimax,
     "deepseek": _probe_deepseek,
+    "antigravity-agy": _probe_antigravity_all,
+    "antigravity-agy-gemini": lambda: _parse_agy_group("gemini models", "AGY (Gemini)"),
+    "antigravity-agy-argon": lambda: _parse_agy_group("gemini 4 argon", "AGY (Argon)"),
+    "antigravity-agy-claude": lambda: _parse_agy_group("claude and gpt", "AGY (Claude / 3P)"),
+    "mistral-vibe": _probe_mistral,
+    "mistral": _probe_mistral,
 }
 
 
@@ -644,6 +934,30 @@ def _configured_providers() -> set[str]:
         env_hint = _ENV_HINTS.get(provider)
         if env_hint and os.environ.get(env_hint):
             configured.add(provider)
+
+    # Antigravity CLI check
+    if _get_agy_command():
+        configured.update({
+            "antigravity-agy",
+            "antigravity-agy-gemini",
+            "antigravity-agy-argon",
+            "antigravity-agy-claude",
+        })
+
+    # Anthropic OAuth check
+    try:
+        from agent.anthropic_credentials import resolve_anthropic_token
+
+        if resolve_anthropic_token():
+            configured.add("anthropic")
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Mistral checks
+    if "mistral-vibe" in configured or os.environ.get("MISTRAL_API_KEY") or os.environ.get("MISTRAL_VIBE_API_KEY"):
+        configured.add("mistral")
+        configured.add("mistral-vibe")
+
     return configured
 
 
@@ -675,6 +989,12 @@ def _build_payload(home: Optional[Path], profile_name: Optional[str]) -> dict[st
                     probes[pid] = _unavailable(f"Probe failed: {type(exc).__name__}: {exc}")
 
     names = sorted(active | configured, key=lambda pid: labels.get(pid, pid).lower())
+
+    # When granular AGY sub-providers are present, omit the aggregate "antigravity-agy" card
+    sub_agy = {"antigravity-agy-gemini", "antigravity-agy-argon", "antigravity-agy-claude"}
+    if any(s in names for s in sub_agy):
+        names = [pid for pid in names if pid != "antigravity-agy"]
+
     providers = []
     for pid in names:
         quota = probes.get(pid) or _unavailable(

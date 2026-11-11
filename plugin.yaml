@@ -1,3 +1,3 @@
 name: ai-usage-tracker
-version: "1.0.2"
-description: Live subscription-quota windows for every AI provider Hermes can route to, per profile
+version: "2.0.0"
+description: Live subscription-quota tracker with granular sub-quota windows (AGY Gemini/Argon/Claude, Claude Fable, Codex, Mistral) and Orca-style status bar
